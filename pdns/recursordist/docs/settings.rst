@@ -386,6 +386,29 @@ If `pdns-distributes-queries`_ is set, spawn this number of distributor threads 
 handle incoming queries and distribute them to other threads based on a hash of the query, to maximize the cache hit
 ratio.
 
+.. _settings-dot-to-auth-names:
+
+``dot-to-auth-names``
+---------------------
+.. versionadded:: 4.6.0
+
+- Comma separated list of domain-names or suffixes
+- Default: (empty).
+
+Force DoT to the listed authoritative nameservers. For this to work, DoT support has to be compiled in.
+Currently, the certificate is not checked for validity in any way.
+
+.. _settings-dot-to-port-853:
+
+``dot-to-port-853``
+-------------------
+.. versionadded:: 4.6.0
+
+- Boolean
+- Default: ``yes`` if DoT support is compiled in, ``no`` otherwise.
+
+Enable DoT to forwarders that specify port 853.
+
 .. _setting-dns64-prefix:
 
 ``dns64-prefix``
@@ -1363,10 +1386,14 @@ without consulting authoritative servers.
 .. versionadded:: 4.1.0
 
 -  Integer
--  Default: 2500
+-  Default: 150
 
 Maximum number of iterations allowed for an NSEC3 record.
 If an answer containing an NSEC3 record with more iterations is received, its DNSSEC validation status is treated as Insecure.
+
+.. versionchanged:: 4.5.2
+
+   Default is now 150, was 2500 before.
 
 .. _setting-packetcache-ttl:
 
@@ -1520,7 +1547,7 @@ enlarge this value or run with fewer threads.
 
 ``refresh-on-ttl-perc``
 -----------------------
-.. versionadded: 4.5.0
+.. versionadded:: 4.5.0
 
 -  Integer
 -  Default: 0
@@ -1782,7 +1809,7 @@ These statistics can still be retrieved individually by specifically asking for 
 .. versionadded:: 4.5.0
 
 -  String
--  Default: "cache-bytes, packetcache-bytes, special-memory-usage, ecs-v4-response-bits-*, ecs-v6-response-bits-*"
+-  Default: "cache-bytes, packetcache-bytes, special-memory-usage, ecs-v4-response-bits-\*, ecs-v6-response-bits-\*, cumul-answers-\*, cumul-auth4answers-\*, cumul-auth6answers-\*"
 
 A list of comma-separated statistic names, that are prevented from being exported via carbon for performance reasons.
 
@@ -1801,7 +1828,7 @@ A list of comma-separated statistic names, that are prevented from being exporte
 .. versionadded:: 4.5.0
 
 -  String
--  Default: "cache-bytes, packetcache-bytes, special-memory-usage, ecs-v4-response-bits-*, ecs-v6-response-bits-*"
+-  Default: "cache-bytes, packetcache-bytes, special-memory-usage, ecs-v4-response-bits-\*, ecs-v6-response-bits-\*, cumul-answers-\*, cumul-auth4answers-\*, cumul-auth6answers-\*"
 
 A list of comma-separated statistic names, that are disabled when retrieving the complete list of statistics via `rec_control get-all`, for performance reasons.
 These statistics can still be retrieved individually.

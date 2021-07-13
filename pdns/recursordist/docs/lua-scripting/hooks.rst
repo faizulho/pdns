@@ -115,8 +115,8 @@ Interception Functions
       The ability to craft answers was added.
 
     This function is the FFI counterpart of the :func:`gettag` function, and offers the same functionality.
-    It accepts a single, scalable parameter which can be accessed using FFI accessors.
-    Like the non-FFI version, it has the ability to set a tag for the packetcache, policy tags, a routing tag, the :attr:`DNSQuestion.requestorId` and :attr:`DNSQuestion.deviceId`values and to fill the :attr:`DNSQuestion.data` table. It also offers ways to mark the answer as variable so it's not inserted into the packetcache, to set a cap on the TTL of the returned records, and to generate a response by adding records and setting the RCode. It can also instruct the recursor to do a proper resolution in order to follow any `CNAME` records added in this step.
+    It accepts a single, scalable parameter which can be accessed using :doc:`FFI accessors <ffi>`.
+    Like the non-FFI version, it has the ability to set a tag for the packetcache, policy tags, a routing tag, the :attr:`DNSQuestion.requestorId` and :attr:`DNSQuestion.deviceId` values and to fill the :attr:`DNSQuestion.data` table. It also offers ways to mark the answer as variable so it's not inserted into the packetcache, to set a cap on the TTL of the returned records, and to generate a response by adding records and setting the RCode. It can also instruct the recursor to do a proper resolution in order to follow any `CNAME` records added in this step.
 
 .. function:: prerpz(dq) -> bool
 
@@ -319,21 +319,19 @@ Dropping all traffic from botnet-infected users
 Frequently, DoS attacks are performed where specific IP addresses are attacked, often by queries coming in from open resolvers.
 These queries then lead to a lot of queries to 'authoritative servers' which actually often aren't nameservers at all, but just targets of attack.
 
-The following script will add a requestor's IP address to a blocking set if they've sent a query that caused PowerDNS to attempt to talk to a certain subnet.
-
 This specific script is, as of January 2015, useful to prevent traffic to ezdns.it related traffic from creating CPU load.
 This script requires PowerDNS Recursor 4.x or later.
 
 .. code-block:: Lua
 
     lethalgroup=newNMG()
-    lethalgroup:addMask("192.121.121.0/24") -- touch these nameservers and you die
+    lethalgroup:addMask("192.121.121.0/24") -- touch these nameservers and original query gets dropped
 
     function preoutquery(dq)
         print("pdns wants to ask "..dq.remoteaddr:toString().." about "..dq.qname:toString().." "..dq.qtype.." on behalf of requestor "..dq.localaddr:toString())
         if(lethalgroup:match(dq.remoteaddr))
         then
-            print("We matched the group "..lethalgroup:tostring().."!", "killing query dead & adding requestor "..dq.localaddr:toString().." to block list")
+            print("We matched the group "..lethalgroup:tostring().."! killing query dead from requestor "..dq.localaddr:toString())
             dq.rcode = -3 -- "kill" 
             return true
         end

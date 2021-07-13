@@ -938,6 +938,14 @@ aggressiveNSECCacheNSEC3WcHits OBJECT-TYPE
         "Number of answers synthesized from the NSEC3 aggressive cache"
     ::= { stats 112 }
 
+dotOutqueries OBJECT-TYPE
+    SYNTAX Counter64
+    MAX-ACCESS read-only
+    STATUS current
+    DESCRIPTION
+        "Number of outgoing DoT queries since starting"
+    ::= { stats 113 }
+
 ---
 --- Traps / Notifications
 ---
@@ -954,6 +962,8 @@ trapReason OBJECT-TYPE
         "Reason for this trap"
     ::= { trapObjects 1 }
 
+--- { trapObjects 5000 } up to and including { trapObjects 5999 } are reserved for local, product-specific extensions to the Recursor MIB
+
 customTrap NOTIFICATION-TYPE
     OBJECTS {
         trapReason
@@ -961,6 +971,8 @@ customTrap NOTIFICATION-TYPE
     STATUS current
     DESCRIPTION "Trap sent by sendCustomTrap"
     ::= { traps 1 }
+
+--- { traps 5000 } up to and including { traps 5999 } are reserved for local, product-specific extensions to the Recursor MIB
 
 ---
 --- Conformance
@@ -1093,7 +1105,8 @@ recGroup OBJECT-GROUP
         aggressiveNSECCacheNSECHits,
         aggressiveNSECCacheNSEC3Hits,
         aggressiveNSECCacheNSECWcHits,
-        aggressiveNSECCacheNSEC3WcHits
+        aggressiveNSECCacheNSEC3WcHits,
+        dotOutqueries
     }
     STATUS current
     DESCRIPTION "Objects conformance group for PowerDNS Recursor"

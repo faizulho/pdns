@@ -42,6 +42,7 @@
 #include "rec-lua-conf.hh"
 #include "rpzloader.hh"
 #include "uuid-utils.hh"
+#include "tcpiohandler.hh"
 
 extern thread_local FDMultiplexer* t_fdm;
 
@@ -445,7 +446,6 @@ static void prometheusMetrics(HttpRequest *req, HttpResponse *resp) {
     for (const auto& tup : varmap) {
         std::string metricName = tup.first;
         std::string prometheusMetricName = tup.second.d_prometheusName;
-
         MetricDefinition metricDetails;
 
         if (s_metricDefinitions.getMetricDetails(metricName, metricDetails)) {
@@ -455,7 +455,13 @@ static void prometheusMetrics(HttpRequest *req, HttpResponse *resp) {
           if (prometheusTypeName.empty()) {
             continue;
           }
-
+          if (metricDetails.prometheusType == PrometheusMetricType::histogram) {
+            // name is XXX_count, strip the _count part
+            prometheusMetricName = prometheusMetricName.substr(0, prometheusMetricName.length() - 6);
+            output << "# HELP " << prometheusMetricName << " " << metricDetails.description << "\n";
+            output << "# TYPE " << prometheusMetricName << " " << prometheusTypeName << "\n";
+            continue;
+          }
           // for these we have the help and types encoded in the sources:
           output << "# HELP " << prometheusMetricName << " " << metricDetails.description << "\n";
           output << "# TYPE " << prometheusMetricName << " " << prometheusTypeName << "\n";
@@ -650,7 +656,7 @@ const std::map<std::string, MetricDefinition> MetricDefinitionStorage::metrics =
                     "Number of servers that sent a valid EDNS PING response")},
   {"edns-ping-mismatches",
    MetricDefinition(PrometheusMetricType::counter,
-                    "Number of servers that sent an invalid EDN PING response")},
+                    "Number of servers that sent an invalid EDNS PING response")},
   {"failed-host-entries",
    MetricDefinition(PrometheusMetricType::counter,
                     "Number of servers that failed to resolve")},
@@ -1024,6 +1030,22 @@ const std::map<std::string, MetricDefinition> MetricDefinitionStorage::metrics =
     MetricDefinition(PrometheusMetricType::gauge,
                      "number of tasks currently in the taskqueue")},
 
+  { "dot-outqueries",
+    MetricDefinition(PrometheusMetricType::counter,
+                     "Number of outgoing DoT queries since starting")},
+
+  // For cumulative histogram, state the xxx_count name where xxx matches the name in rec_channel_rec
+  { "cumul-answers-count",
+    MetricDefinition(PrometheusMetricType::histogram,
+                     "histogram of our answer times")},
+  // For cumulative histogram, state the xxx_count name where xxx matches the name in rec_channel_rec
+  { "cumul-auth4answers-count",
+    MetricDefinition(PrometheusMetricType::histogram,
+                     "histogram of authoritative answer times over IPv4")},
+  // For cumulative histogram, state the xxx_count name where xxx matches the name in rec_channel_rec
+  { "cumul-auth6answers-count",
+    MetricDefinition(PrometheusMetricType::histogram,
+                     "histogram of authoritative answer times over IPV6")},
 };
 
 #define CHECK_PROMETHEUS_METRICS 0
@@ -1242,19 +1264,24 @@ void AsyncWebServer::serveConnection(std::shared_ptr<Socket> client) const {
   HttpRequest req(logprefix);
   HttpResponse resp;
   ComboAddress remote;
-  string reply;
+  PacketBuffer reply;
 
   try {
     YaHTTP::AsyncRequestLoader yarl;
     yarl.initialize(&req);
     client->setNonBlocking();
 
-    string data;
+    const struct timeval timeout{g_networkTimeoutMsec / 1000, g_networkTimeoutMsec % 1000 * 1000};
+    std::shared_ptr<TLSCtx> tlsCtx{nullptr};
+    auto handler = std::make_shared<TCPIOHandler>("", client->releaseHandle(), timeout, tlsCtx, time(nullptr));
+
+    PacketBuffer data;
     try {
       while(!req.complete) {
-        auto ret = arecvtcp(data, 16384, client.get(), true);
+        auto ret = arecvtcp(data, 16384, handler, true);
         if (ret == LWResult::Result::Success) {
-          req.complete = yarl.feed(data);
+          string str(reinterpret_cast<const char*>(data.data()), data.size());
+          req.complete = yarl.feed(str);
         } else {
           // read error OR EOF
           break;
@@ -1275,14 +1302,16 @@ void AsyncWebServer::serveConnection(std::shared_ptr<Socket> client) const {
     WebServer::handleRequest(req, resp);
     ostringstream ss;
     resp.write(ss);
-    reply = ss.str();
+    const string &s = ss.str();
+    reply.insert(reply.end(), s.cbegin(), s.cend());
 
     logResponse(resp, remote, logprefix);
 
     // now send the reply
-    if (asendtcp(reply, client.get()) != LWResult::Result::Success || reply.empty()) {
+    if (asendtcp(reply, handler) != LWResult::Result::Success || reply.empty()) {
       g_log<<Logger::Error<<logprefix<<"Failed sending reply to HTTP client"<<endl;
     }
+    handler->close(); // needed to signal "done" to client
   }
   catch(PDNSException &e) {
     g_log<<Logger::Error<<logprefix<<"Exception: "<<e.reason<<endl;

@@ -370,7 +370,7 @@ static IOState sendQueuedResponses(std::shared_ptr<IncomingTCPConnectionState>& 
 
 static void handleResponseSent(std::shared_ptr<IncomingTCPConnectionState>& state, const TCPResponse& currentResponse)
 {
-  if (state->d_isXFR) {
+  if (state->d_isXFR || currentResponse.d_idstate.qtype == QType::AXFR || currentResponse.d_idstate.qtype == QType::IXFR) {
     return;
   }
 
@@ -383,7 +383,7 @@ static void handleResponseSent(std::shared_ptr<IncomingTCPConnectionState>& stat
     const auto& ids = currentResponse.d_idstate;
     double udiff = ids.sentTime.udiff();
     g_rings.insertResponse(answertime, state->d_ci.remote, ids.qname, ids.qtype, static_cast<unsigned int>(udiff), static_cast<unsigned int>(currentResponse.d_buffer.size()), currentResponse.d_cleartextDH, ds->remote);
-    vinfolog("Got answer from %s, relayed to %s (%s, %d bytes), took %f usec", ds->remote.toStringWithPort(), ids.origRemote.toStringWithPort(), (state->d_ci.cs->tlsFrontend ? "DoT" : "TCP"), currentResponse.d_buffer.size(), udiff);
+    vinfolog("Got answer from %s, relayed to %s (%s, %d bytes), took %f usec", ds->remote.toStringWithPort(), ids.origRemote.toStringWithPort(), (state->d_handler.isTLS() ? "DoT" : "TCP"), currentResponse.d_buffer.size(), udiff);
   }
 
   switch (currentResponse.d_cleartextDH.rcode) {
@@ -435,6 +435,9 @@ void IncomingTCPConnectionState::resetForNewQuery()
   d_buffer.resize(sizeof(uint16_t));
   d_currentPos = 0;
   d_querySize = 0;
+  d_xfrMasterSerial = 0;
+  d_xfrSerialCount = 0;
+  d_xfrMasterSerialCount = 0;
   d_state = State::waitingForQuery;
 }
 
@@ -582,11 +585,11 @@ void IncomingTCPConnectionState::handleResponse(std::shared_ptr<IncomingTCPConne
       return;
     }
 
-    DNSResponse dr = makeDNSResponseFromIDState(ids, response.d_buffer, true);
+    DNSResponse dr = makeDNSResponseFromIDState(ids, response.d_buffer);
 
     memcpy(&response.d_cleartextDH, dr.getHeader(), sizeof(response.d_cleartextDH));
 
-    if (!processResponse(response.d_buffer, state->d_threadData.localRespRuleActions, dr, false)) {
+    if (!processResponse(response.d_buffer, state->d_threadData.localRespRuleActions, dr, false, false)) {
       state->terminateClientConnection();
       return;
     }
@@ -678,7 +681,15 @@ static void handleQuery(std::shared_ptr<IncomingTCPConnectionState>& state, cons
   uint16_t qtype, qclass;
   unsigned int qnameWireLength = 0;
   DNSName qname(reinterpret_cast<const char*>(state->d_buffer.data()), state->d_buffer.size(), sizeof(dnsheader), false, &qtype, &qclass, &qnameWireLength);
-  DNSQuestion dq(&qname, qtype, qclass, &state->d_proxiedDestination, &state->d_proxiedRemote, state->d_buffer, true, &queryRealTime);
+  DNSQuestion::Protocol protocol = DNSQuestion::Protocol::DoTCP;
+  if (dnsCryptQuery) {
+    protocol = DNSQuestion::Protocol::DNSCryptTCP;
+  }
+  else if (state->d_handler.isTLS()) {
+    protocol = DNSQuestion::Protocol::DoT;
+  }
+
+  DNSQuestion dq(&qname, qtype, qclass, &state->d_proxiedDestination, &state->d_proxiedRemote, state->d_buffer, protocol, &queryRealTime);
   dq.dnsCryptQuery = std::move(dnsCryptQuery);
   dq.sni = state->d_handler.getServerNameIndication();
   if (state->d_proxyProtocolValues) {
@@ -761,7 +772,7 @@ static void handleQuery(std::shared_ptr<IncomingTCPConnectionState>& state, cons
   }
 
   ++state->d_currentQueriesCount;
-  vinfolog("Got query for %s|%s from %s (%s, %d bytes), relayed to %s", query.d_idstate.qname.toLogString(), QType(query.d_idstate.qtype).getName(), state->d_proxiedRemote.toStringWithPort(), (state->d_ci.cs->tlsFrontend ? "DoT" : "TCP"), query.d_buffer.size(), ds->getName());
+  vinfolog("Got query for %s|%s from %s (%s, %d bytes), relayed to %s", query.d_idstate.qname.toLogString(), QType(query.d_idstate.qtype).toString(), state->d_proxiedRemote.toStringWithPort(), (state->d_handler.isTLS() ? "DoT" : "TCP"), query.d_buffer.size(), ds->getName());
   downstreamConnection->queueQuery(std::move(query), downstreamConnection);
 }
 
@@ -1290,7 +1301,7 @@ void tcpAcceptorThread(ClientState* cs)
         auto tmp = ci.release();
         try {
           // throws on failure
-          writen2WithTimeout(pipe, &tmp, sizeof(tmp), 0);
+          writen2WithTimeout(pipe, &tmp, sizeof(tmp), timeval{0,0});
         }
         catch (...) {
           delete tmp;

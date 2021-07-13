@@ -270,7 +270,7 @@ static vector<DNSResourceRecord> doAxfr(const ComboAddress& raddr, const DNSName
         continue;
 
       if(!rec.qname.isPartOf(domain)) {
-        g_log<<Logger::Warning<<logPrefix<<"primary tried to sneak in out-of-zone data '"<<rec.qname<<"'|"<<rec.qtype.getName()<<", ignoring"<<endl;
+        g_log<<Logger::Warning<<logPrefix<<"primary tried to sneak in out-of-zone data '"<<rec.qname<<"'|"<<rec.qtype.toString()<<", ignoring"<<endl;
         continue;
       }
 
@@ -281,7 +281,7 @@ static vector<DNSResourceRecord> doAxfr(const ComboAddress& raddr, const DNSName
 
       for(auto& rr :  out) {
         if(!rr.qname.isPartOf(domain)) {
-          g_log<<Logger::Error<<logPrefix<<"axfrfilter() filter tried to sneak in out-of-zone data '"<<rr.qname<<"'|"<<rr.qtype.getName()<<", ignoring"<<endl;
+          g_log<<Logger::Error<<logPrefix<<"axfrfilter() filter tried to sneak in out-of-zone data '"<<rr.qname<<"'|"<<rr.qtype.toString()<<", ignoring"<<endl;
           continue;
         }
         if(!processRecordForZS(domain, firstNSEC3, rr, zs))
@@ -951,6 +951,10 @@ void CommunicatorClass::slaveRefresh(PacketHandler *P)
       } else if (newCount % 10 == 0) {
         g_log<<Logger::Notice<<"Unable to retrieve SOA for "<<di.zone<<", this was the "<<std::to_string(newCount)<<"th time. Skipping SOA checks until "<<nextCheck<<endl;
       }
+      // Make sure we recheck SOA for notifies
+      if (di.receivedNotify) {
+        di.backend->setStale(di.id);
+      }
       continue;
     }
 
@@ -1023,7 +1027,7 @@ void CommunicatorClass::slaveRefresh(PacketHandler *P)
         addSuckRequest(di.zone, remote, prio);
       }
       else {
-        g_log<<Logger::Notice<<"Domain '"<< di.zone << "' is fresh, but RRSIGs differ on master" << remote.toStringWithPortExcept(53)<<", so DNSSEC is stale, serial is " << ourserial << endl;
+        g_log<<Logger::Notice<<"Domain '"<< di.zone << "' is fresh, but RRSIGs differ on master " << remote.toStringWithPortExcept(53)<<", so DNSSEC is stale, serial is " << ourserial << endl;
         addSuckRequest(di.zone, remote, prio);
       }
     }

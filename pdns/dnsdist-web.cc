@@ -507,7 +507,8 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
     output << statesbase << "queries"                      << label << " " << state->queries.load()              << "\n";
     output << statesbase << "responses"                    << label << " " << state->responses.load()            << "\n";
     output << statesbase << "drops"                        << label << " " << state->reuseds.load()              << "\n";
-    output << statesbase << "latency"                      << label << " " << state->latencyUsec/1000.0          << "\n";
+    if (state->isUp())
+        output << statesbase << "latency"                  << label << " " << state->latencyUsec/1000.0          << "\n";
     output << statesbase << "senderrors"                   << label << " " << state->sendErrors.load()           << "\n";
     output << statesbase << "outstanding"                  << label << " " << state->outstanding.load()          << "\n";
     output << statesbase << "order"                        << label << " " << state->order                       << "\n";
@@ -517,7 +518,7 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
     output << statesbase << "tcpgaveup"                    << label << " " << state->tcpGaveUp                   << "\n";
     output << statesbase << "tcpreadtimeouts"              << label << " " << state->tcpReadTimeouts             << "\n";
     output << statesbase << "tcpwritetimeouts"             << label << " " << state->tcpWriteTimeouts            << "\n";
-    output << statesbase << "tcpconnecttimeouts"           << label << " " << state->tcpConnectTimeouts         << "\n";
+    output << statesbase << "tcpconnecttimeouts"           << label << " " << state->tcpConnectTimeouts          << "\n";
     output << statesbase << "tcpcurrentconnections"        << label << " " << state->tcpCurrentConnections       << "\n";
     output << statesbase << "tcpmaxconcurrentconnections"  << label << " " << state->tcpMaxConcurrentConnections << "\n";
     output << statesbase << "tcpnewconnections"            << label << " " << state->tcpNewConnections           << "\n";
@@ -871,6 +872,63 @@ static void handleJSONStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
   }
 }
 
+static void addServerToJSON(Json::array& servers, int id, const std::shared_ptr<DownstreamState>& a)
+{
+  string status;
+  if (a->availability == DownstreamState::Availability::Up) {
+    status = "UP";
+  }
+  else if (a->availability == DownstreamState::Availability::Down) {
+    status = "DOWN";
+  }
+  else {
+    status = (a->upStatus ? "up" : "down");
+  }
+
+  Json::array pools;
+  for(const auto& p: a->pools) {
+    pools.push_back(p);
+  }
+
+  Json::object server {
+    {"id", id},
+    {"name", a->getName()},
+    {"address", a->remote.toStringWithPort()},
+    {"state", status},
+    {"qps", (double)a->queryLoad},
+    {"qpsLimit", (double)a->qps.getRate()},
+    {"outstanding", (double)a->outstanding},
+    {"reuseds", (double)a->reuseds},
+    {"weight", (double)a->weight},
+    {"order", (double)a->order},
+    {"pools", pools},
+    {"latency", (double)(a->latencyUsec/1000.0)},
+    {"queries", (double)a->queries},
+    {"responses", (double)a->responses},
+    {"sendErrors", (double)a->sendErrors},
+    {"tcpDiedSendingQuery", (double)a->tcpDiedSendingQuery},
+    {"tcpDiedReadingResponse", (double)a->tcpDiedReadingResponse},
+    {"tcpGaveUp", (double)a->tcpGaveUp},
+    {"tcpConnectTimeouts", (double)a->tcpConnectTimeouts},
+    {"tcpReadTimeouts", (double)a->tcpReadTimeouts},
+    {"tcpWriteTimeouts", (double)a->tcpWriteTimeouts},
+    {"tcpCurrentConnections", (double)a->tcpCurrentConnections},
+    {"tcpMaxConcurrentConnections", (double)a->tcpMaxConcurrentConnections},
+    {"tcpNewConnections", (double)a->tcpNewConnections},
+    {"tcpReusedConnections", (double)a->tcpReusedConnections},
+    {"tcpAvgQueriesPerConnection", (double)a->tcpAvgQueriesPerConnection},
+    {"tcpAvgConnectionDuration", (double)a->tcpAvgConnectionDuration},
+    {"dropRate", (double)a->dropRate}
+  };
+
+  /* sending a latency for a DOWN server doesn't make sense */
+  if (a->availability == DownstreamState::Availability::Down) {
+    server["latency"] = nullptr;
+  }
+
+  servers.push_back(std::move(server));
+}
+
 static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
 {
   handleCORS(req, resp);
@@ -880,55 +938,7 @@ static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
   auto localServers = g_dstates.getLocal();
   int num = 0;
   for (const auto& a : *localServers) {
-    string status;
-    if(a->availability == DownstreamState::Availability::Up)
-      status = "UP";
-    else if(a->availability == DownstreamState::Availability::Down)
-      status = "DOWN";
-    else
-      status = (a->upStatus ? "up" : "down");
-
-    Json::array pools;
-    for(const auto& p: a->pools)
-      pools.push_back(p);
-
-    Json::object server{
-      {"id", num++},
-      {"name", a->getName()},
-      {"address", a->remote.toStringWithPort()},
-      {"state", status},
-      {"qps", (double)a->queryLoad},
-      {"qpsLimit", (double)a->qps.getRate()},
-      {"outstanding", (double)a->outstanding},
-      {"reuseds", (double)a->reuseds},
-      {"weight", (double)a->weight},
-      {"order", (double)a->order},
-      {"pools", pools},
-      {"latency", (double)(a->latencyUsec/1000.0)},
-      {"queries", (double)a->queries},
-      {"responses", (double)a->responses},
-      {"sendErrors", (double)a->sendErrors},
-      {"tcpDiedSendingQuery", (double)a->tcpDiedSendingQuery},
-      {"tcpDiedReadingResponse", (double)a->tcpDiedReadingResponse},
-      {"tcpGaveUp", (double)a->tcpGaveUp},
-      {"tcpConnectTimeouts", (double)a->tcpConnectTimeouts},
-      {"tcpReadTimeouts", (double)a->tcpReadTimeouts},
-      {"tcpWriteTimeouts", (double)a->tcpWriteTimeouts},
-      {"tcpCurrentConnections", (double)a->tcpCurrentConnections},
-      {"tcpMaxConcurrentConnections", (double)a->tcpMaxConcurrentConnections},
-      {"tcpNewConnections", (double)a->tcpNewConnections},
-      {"tcpReusedConnections", (double)a->tcpReusedConnections},
-      {"tcpAvgQueriesPerConnection", (double)a->tcpAvgQueriesPerConnection},
-      {"tcpAvgConnectionDuration", (double)a->tcpAvgConnectionDuration},
-      {"dropRate", (double)a->dropRate}
-    };
-
-    /* sending a latency for a DOWN server doesn't make sense */
-    if (a->availability == DownstreamState::Availability::Down) {
-      server["latency"] = nullptr;
-    }
-
-    servers.push_back(server);
+    addServerToJSON(servers, num++, a);
   }
 
   Json::array frontends;
@@ -1098,6 +1108,57 @@ static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
     { "dohFrontends", dohs }
   };
   resp.headers["Content-Type"] = "application/json";
+  resp.body = my_json.dump();
+}
+
+static void handlePoolStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
+{
+  handleCORS(req, resp);
+  const auto poolName = req.getvars.find("name");
+  if (poolName == req.getvars.end()) {
+    resp.status = 400;
+    return;
+  }
+
+  resp.status = 200;
+  Json::array doc;
+
+  auto localPools = g_pools.getLocal();
+  const auto poolIt = localPools->find(poolName->second);
+  if (poolIt == localPools->end()) {
+    resp.status = 404;
+    return;
+  }
+
+  const auto& pool = poolIt->second;
+  const auto& cache = pool->packetCache;
+  Json::object entry {
+    { "name", poolName->second },
+    { "serversCount", (double) pool->countServers(false) },
+    { "cacheSize", (double) (cache ? cache->getMaxEntries() : 0) },
+    { "cacheEntries", (double) (cache ? cache->getEntriesCount() : 0) },
+    { "cacheHits", (double) (cache ? cache->getHits() : 0) },
+    { "cacheMisses", (double) (cache ? cache->getMisses() : 0) },
+    { "cacheDeferredInserts", (double) (cache ? cache->getDeferredInserts() : 0) },
+    { "cacheDeferredLookups", (double) (cache ? cache->getDeferredLookups() : 0) },
+    { "cacheLookupCollisions", (double) (cache ? cache->getLookupCollisions() : 0) },
+    { "cacheInsertCollisions", (double) (cache ? cache->getInsertCollisions() : 0) },
+    { "cacheTTLTooShorts", (double) (cache ? cache->getTTLTooShorts() : 0) }
+  };
+
+  Json::array servers;
+  int num = 0;
+  for (const auto& a : *pool->getServers()) {
+    addServerToJSON(servers, num, a.second);
+    num++;
+  }
+
+  resp.headers["Content-Type"] = "application/json";
+  Json my_json = Json::object {
+    { "stats", entry },
+    { "servers", servers }
+  };
+
   resp.body = my_json.dump();
 }
 
@@ -1297,6 +1358,7 @@ void registerBuiltInWebHandlers()
   registerWebHandler("/jsonstat", handleJSONStats);
   registerWebHandler("/metrics", handlePrometheus);
   registerWebHandler("/api/v1/servers/localhost", handleStats);
+  registerWebHandler("/api/v1/servers/localhost/pool", handlePoolStats);
   registerWebHandler("/api/v1/servers/localhost/statistics", handleStatsOnly);
   registerWebHandler("/api/v1/servers/localhost/config", handleConfigDump);
   registerWebHandler("/api/v1/servers/localhost/config/allow-from", handleAllowFrom);

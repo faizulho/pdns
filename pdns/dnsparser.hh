@@ -37,7 +37,6 @@
 #include "pdnsexception.hh"
 #include "iputils.hh"
 #include "svc-records.hh"
-#include "views.hh"
 
 /** DNS records have three representations:
     1) in the packet
@@ -381,6 +380,11 @@ public:
   uint16_t getType() const override
   {
     return d_dr.d_type;
+  }
+
+  const vector<uint8_t>& getRawContent() const
+  {
+    return d_record;
   }
 
 private:

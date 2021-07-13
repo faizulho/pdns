@@ -4,8 +4,18 @@ Upgrade Guide
 Before upgrading, it is advised to read the :doc:`changelog/index`.
 When upgrading several versions, please read **all** notes applying to the upgrade.
 
-4.4.x to 4.5.0 or master
+4.5.x to 4.6.0 or master
 ------------------------
+
+4.5.1 to 4.5.2
+--------------
+
+Deprecated and changed settings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- The :ref:`setting-nsec3-max-iterations` default value has been changed from 2500 to 150.
+
+4.4.x to 4.5.1
+--------------
 
 Offensive language
 ^^^^^^^^^^^^^^^^^^
@@ -26,7 +36,7 @@ The next release will start deprecating them.
 Users are advised to start using the new names to avoid future
 trouble.
 
-Special Domains
+Special domains
 ^^^^^^^^^^^^^^^
 Queries for all names in the ``.localhost`` domain will answer in accordance with :rfc:`6761` section 6.3 point 4.
 That means that they will be answered with ``127.0.0.1``, ``::1`` or a negative response.
@@ -38,15 +48,16 @@ A single minus *-* can be used as a filename to write the data to the standard o
 Additionally, a single minus *-* can be used as a filename to write the data to the standard output stream.
 Previously the file was opened by the recursor, possibly in its chroot environment.
 
-New Settings
+New settings
 ^^^^^^^^^^^^
-- The :ref:`setting-extended-resolution-errors` has been added, enabling adding EDNS Extended Errors to responses.
-- The :ref:`setting-refresh-on-ttl-perc`, enabling an automatic cache-refresh mechanism.
+- The :ref:`setting-extended-resolution-errors` setting has been added, enabling adding EDNS Extended Errors to responses.
+- The :ref:`setting-refresh-on-ttl-perc` setting has been added, enabling an automatic cache-refresh mechanism.
 - The :ref:`setting-ecs-ipv4-never-cache` and :ref:`setting-ecs-ipv6-never-cache` settings have been added, allowing an overrule of the existing decision whether to cache EDNS responses carrying subnet information.
 - The :ref:`setting-aggressive-nsec-cache-size` setting has been added, enabling the functionality described in :rfc:`8198`.
 - The :ref:`setting-x-dnssec-names` setting has been added, allowing DNSSEC metrics to be recorded in a different set of counter for given domains.
 - The :ref:`setting-non-resolving-ns-max-fails` and :ref:`setting-non-resolving-ns-throttle-time` settings have been added, allowing the control of the cache of nameservers failing to resolve.
 - The :ref:`setting-edns-padding-from` and :ref:`setting-edns-padding-mode` and :ref:`setting-edns-padding-tag` settings have been added, to control how padding is applied to answers sent to clients.
+- The :ref:`setting-tcp-fast-open-connect` setting has been added, it enables TCP Fast Connect for outgoing connections. Please read :ref:`tcp-fast-open-support` before enabling this feature.
 
 Deprecated and changed settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -60,10 +71,6 @@ Deprecated and changed settings
 Removed settings
 ^^^^^^^^^^^^^^^^
 - The :ref:`setting-query-local-address6` has been removed. It already was deprecated.
-
-New settings
-^^^^^^^^^^^^
-- A new setting :ref:`setting-tcp-fast-open-connect` has been introduced, it enables TCP Fast Connect for outgoing connections. Please read :ref:`tcp-fast-open-support` before enabling this feature.
 
 4.3.x to 4.4.0
 --------------
@@ -131,7 +138,7 @@ New settings
 - The :ref:`setting-max-generate-steps` setting has been added. This sets the maximum number of steps that will be performed when loading a BIND zone with the ``$GENERATE`` directive. The default is 0, which is unlimited.
 - The :ref:`setting-nothing-below-nxdomain` setting has been added. This setting controls the way cached NXDOMAIN replies imply non-existence of a whole subtree. The default is `dnssec` which means that only DNSSEC validated NXDOMAINS results are used.
 - The :ref:`setting-qname-minimization` setting has been added. This options controls if QName Minimization is used. The default is `yes`.
-  
+ 
 4.1.x to 4.2.0
 --------------
 

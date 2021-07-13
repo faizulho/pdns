@@ -311,14 +311,14 @@ static int backendStatTable_handler(netsnmp_mib_handler* handler,
         break;
       case COLUMN_BACKENDOUTSTANDING:
         DNSDistSNMPAgent::setCounter64Value(request,
-                                            server->outstanding);
+                                            server->outstanding.load());
         break;
       case COLUMN_BACKENDQPSLIMIT:
         DNSDistSNMPAgent::setCounter64Value(request,
                                             server->qps.getRate());
         break;
       case COLUMN_BACKENDREUSED:
-        DNSDistSNMPAgent::setCounter64Value(request, server->reuseds);
+        DNSDistSNMPAgent::setCounter64Value(request, server->reuseds.load());
         break;
       case COLUMN_BACKENDSTATE:
       {
@@ -353,10 +353,10 @@ static int backendStatTable_handler(netsnmp_mib_handler* handler,
         break;
       }
       case COLUMN_BACKENDQPS:
-        DNSDistSNMPAgent::setCounter64Value(request, server->queryLoad);
+        DNSDistSNMPAgent::setCounter64Value(request, server->queryLoad.load());
         break;
       case COLUMN_BACKENDQUERIES:
-        DNSDistSNMPAgent::setCounter64Value(request, server->queries);
+        DNSDistSNMPAgent::setCounter64Value(request, server->queries.load());
         break;
       case COLUMN_BACKENDORDER:
         DNSDistSNMPAgent::setCounter64Value(request, server->order);
@@ -448,7 +448,7 @@ bool DNSDistSNMPAgent::sendDNSTrap(const DNSQuestion& dq, const std::string& rea
   std::string remote = dq.remote->toString();
   std::string qname = dq.qname->toStringNoDot();
   const uint32_t socketFamily = dq.remote->isIPv4() ? 1 : 2;
-  const uint32_t socketProtocol = dq.tcp ? 2 : 1;
+  const uint32_t socketProtocol = dq.overTCP() ? 2 : 1;
   const uint32_t queryType = dq.getHeader()->qr ? 2 : 1;
   const uint32_t querySize = (uint32_t) dq.getData().size();
   const uint32_t queryID = (uint32_t) ntohs(dq.getHeader()->id);

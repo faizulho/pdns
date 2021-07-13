@@ -473,7 +473,7 @@ These ``DNSRule``\ s be one of the following items:
   .. versionadded:: 1.4.0
 
   Matches DNS over HTTPS queries with a HTTP path matching the regular expression supplied in ``regex``. For example, if the query has been sent to the https://192.0.2.1:443/PowerDNS?dns=... URL, the path would be '/PowerDNS'.
-  Only valid DNS over HTTPS queries are matched. If you want to match all HTTP queries, see :meth:`DOHFrontend.setResponsesMap` instead.
+  Only valid DNS over HTTPS queries are matched. If you want to match all HTTP queries, see :meth:`DOHFrontend:setResponsesMap` instead.
 
   :param str regex: The regex to match on
 
@@ -482,7 +482,7 @@ These ``DNSRule``\ s be one of the following items:
   .. versionadded:: 1.4.0
 
   Matches DNS over HTTPS queries with a HTTP path of ``path``. For example, if the query has been sent to the https://192.0.2.1:443/PowerDNS?dns=... URL, the path would be '/PowerDNS'.
-  Only valid DNS over HTTPS queries are matched. If you want to match all HTTP queries, see :meth:`DOHFrontend.setResponsesMap` instead.
+  Only valid DNS over HTTPS queries are matched. If you want to match all HTTP queries, see :meth:`DOHFrontend:setResponsesMap` instead.
 
   :param str path: The exact HTTP path to match on
 
@@ -943,6 +943,9 @@ The following actions exist.
   .. versionchanged:: 1.4.0
     Added the optional parameters ``verboseOnly`` and ``includeTimestamp``, made ``filename`` optional.
 
+  .. versionchanged:: 1.7.0
+    Added the ``reload`` method.
+
   Log a line for each query, to the specified ``file`` if any, to the console (require verbose) if the empty string is given as filename.
 
   If an empty string is supplied in the file name, the logging is done to stdout, and only in verbose mode by default. This can be changed by setting ``verboseOnly`` to false.
@@ -951,6 +954,8 @@ The following actions exist.
 
   The ``append`` optional parameter specifies whether we open the file for appending or truncate each time (default).
   The ``buffered`` optional parameter specifies whether writes to the file are buffered (default) or not.
+
+  Since 1.7.0 calling the ``reload()`` method on the object will cause it to close and re-open the log file, for rotation purposes.
 
   Subsequent rules are processed after this action.
 
@@ -965,12 +970,17 @@ The following actions exist.
 
   .. versionadded:: 1.5.0
 
+  .. versionchanged:: 1.7.0
+    Added the ``reload`` method.
+
   Log a line for each response, to the specified ``file`` if any, to the console (require verbose) if the empty string is given as filename.
 
   If an empty string is supplied in the file name, the logging is done to stdout, and only in verbose mode by default. This can be changed by setting ``verboseOnly`` to false.
 
   The ``append`` optional parameter specifies whether we open the file for appending or truncate each time (default).
   The ``buffered`` optional parameter specifies whether writes to the file are buffered (default) or not.
+
+  Since 1.7.0 calling the ``reload()`` method on the object will cause it to close and re-open the log file, for rotation purposes.
 
   Subsequent rules are processed after this action.
 
@@ -1441,7 +1451,7 @@ The following actions exist.
 
 .. function:: TCAction()
 
-  Create answer to query with TC and RD bits set, to force the client to TCP.
+  Create answer to query with the TC bit set, and the RA bit set to the value of RD in the query, to force the client to TCP.
 
 .. function:: TeeAction(remote[, addECS])
 

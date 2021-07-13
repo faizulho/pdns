@@ -16,15 +16,21 @@ Record type changes
 
 The in-database format of ``CSYNC``, ``IPSECKEY``, ``NID``, ``L32``, ``L64``, and ``LP`` records has changed from 'generic' format to its specialized format.
 
-API users might notice that replacing records of these types leaves the old TYPExx records around, even if PowerDNS is not serving them.
+Generation of the in-database format of ``SVCB`` and ``HTTPS`` received some important bug fixes.
+(For these two types, you can skip the :ref:`setting-upgrade-unknown-types` setting mentioned below, but we still recommend the re-transfer.)
+
+API users might notice that replacing records of the newly supported types leaves the old TYPExx records around, even if PowerDNS is not serving them.
 To fix this, enable :ref:`setting-upgrade-unknown-types` and replace the records; this will then delete those TYPExx records.
 Then, disable the setting again, because it has a serious performance impact on API operations.
 
 On secondaries, it is recommended to re-transfer, using ``pdns_control retrieve ZONE``, with :ref:`setting-upgrade-unknown-types` enabled, all zones that have records of those types, or ``TYPExx``, for numbers 45 and 62.
 Leave the setting on until all zones have been re-transferred.
 
-Wording changes
+Changed options
 ^^^^^^^^^^^^^^^
+
+Renamed options
+~~~~~~~~~~~~~~~
 
 Various settings have been renamed.
 Their old names still work in 4.5.x, but will be removed in the release after it.
@@ -35,6 +41,23 @@ Their old names still work in 4.5.x, but will be removed in the release after it
 * :ref:`setting-slave-renotify` is now :ref:`setting-secondary-do-renotify`
 * :ref:`setting-slave` is now :ref:`setting-secondary`
 * :ref:`setting-superslave` is now :ref:`setting-autosecondary`
+* :ref:`setting-domain-metadata-cache-ttl` is now :ref:`setting-zone-metadata-cache-ttl`
+
+Changed defaults
+~~~~~~~~~~~~~~~~
+
+- The default value of the :ref:`setting-consistent-backends` option has been changed from ``no`` to ``yes``.
+- The default value of the :ref:`setting-max-nsec3-iterations` option has been changed from ``500`` to ``100``.
+- The default value of the ``timeout`` parameter for :func:`ifportup` and :func:`ifurlup` functions has been changed from ``1`` to ``2`` seconds.
+
+Removed options
+~~~~~~~~~~~~~~~
+- :ref:`setting-local-ipv6` has been removed. IPv4 and IPv6 listen addresses should now be set with :ref:`setting-local-address`.
+- :ref:`setting-query-local-address6` has been removed. IPv4 and IPv6 addresses used for sending queries should now be set with :ref:`setting-query-local-address`.
+
+Starting with auth-4.5.0-beta1:
+
+- The default value of the ``zone-cache-refresh-interval`` option has been changed from ``0`` to ``300``.
 
 4.3.x to 4.4.0
 --------------
@@ -93,7 +116,16 @@ Please carefully read :ref:`setting-lmdb-schema-version` before upgrading to 4.4
 Removed features
 ^^^^^^^^^^^^^^^^
 
-SOA autofilling (i.e. allowing incomplete SOAs in the database) and the API set-ptr feature, that both were deprecated in earlier releases, have now been removed.
+SOA autofilling (i.e. allowing incomplete SOAs in the database) and the API ``set-ptr`` feature, that both were deprecated in earlier releases, have now been removed. Please update your configuration and remove the following settings:
+
+* :ref:`setting-default-soa-mail`
+* :ref:`setting-default-soa-name`
+* :ref:`setting-soa-expire-default`
+* :ref:`setting-soa-minimum-ttl`
+* :ref:`setting-soa-refresh-default`
+* :ref:`setting-soa-retry-default`
+
+Replace them with :ref:`setting-default-soa-content`, but be aware that this will only be used at zone creation time.
 Please run ``pdnsutil check-all-zones`` to check for incomplete SOAs.
 
 The :ref:`setting-do-ipv6-additional-processing` setting was removed. IPv6 additional processing now always happens when IPv4 additional processing happens.
@@ -175,10 +207,14 @@ New settings
   This sets the maximum number of steps that will be performed when loading a BIND zone with the ``$GENERATE`` directive.
   The default is 0, which is unlimited.
 
-Removed settings
-^^^^^^^^^^^^^^^^
+Deprecated settings
+^^^^^^^^^^^^^^^^^^^
 
-- :ref:`setting-local-ipv6` has been deprecated, and will be removed in 4.4.0. IPv4 and IPv6 listen addresses can now be set with :ref:`setting-local-address`. The default for the latter has been changed to ``0.0.0.0, ::``.
+- :ref:`setting-local-ipv6` has been deprecated and will be removed in 4.5.0. Both IPv4 and IPv6 listen addresses can now be set with :ref:`setting-local-address`. The default for the latter has been changed to ``0.0.0.0, ::``.
+
+Changed defaults
+^^^^^^^^^^^^^^^^
+- :ref:`setting-local-address` now defaults to ``0.0.0.0, ::``.
 
 Schema changes
 ^^^^^^^^^^^^^^
@@ -226,6 +262,7 @@ You could accomplish that by deleting all records in the zone with an SQL query 
 - The gsqlite3 backend, and the DNSSEC database for the BIND backend, have a new journal-mode setting. This setting defaults to `WAL <https://www.sqlite.org/wal.html>`_; older versions of PowerDNS did not set the journal mode, which means they used the SQLite default of DELETE.
 - Autoserial support has been removed. The ``change_date`` column has been removed from the ``records`` table in all gsql backends, but leaving it in is harmless.
 - The :doc:`Generic PostgreSQL backend <backends/generic-postgresql>` schema has changed: the ``notified_serial`` column type in the ``domains`` table has been changed from ``INT DEFAULT NULL`` to ``BIGINT DEFAULT NULL``: ``ALTER TABLE domains ALTER notified_serial TYPE bigint USING CASE WHEN notified_serial >= 0 THEN notified_serial::bigint END;``
+- Rectification after API changes is now default (:ref:`setting-default-api-rectify`). If you do mutations in large zones, you may notice a slowdown.
 
 4.1.X to 4.1.14
 ---------------

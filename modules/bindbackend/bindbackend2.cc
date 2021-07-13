@@ -53,6 +53,8 @@
 #include "pdns/misc.hh"
 #include "pdns/dynlistener.hh"
 #include "pdns/lock.hh"
+#include "pdns/auth-zonecache.hh"
+#include "pdns/auth-caches.hh"
 
 /* 
    All instances of this backend share one s_state, which is indexed by zone name and zone id.
@@ -184,13 +186,23 @@ void Bind2Backend::setNotified(uint32_t id, uint32_t serial)
   safePutBBDomainInfo(bbd);
 }
 
-void Bind2Backend::setFresh(uint32_t domain_id)
+void Bind2Backend::setLastCheck(uint32_t domain_id, time_t lastcheck)
 {
   BB2DomainInfo bbd;
   if (safeGetBBDomainInfo(domain_id, &bbd)) {
-    bbd.d_lastcheck = time(nullptr);
+    bbd.d_lastcheck = lastcheck;
     safePutBBDomainInfo(bbd);
   }
+}
+
+void Bind2Backend::setStale(uint32_t domain_id)
+{
+  setLastCheck(domain_id, 0);
+}
+
+void Bind2Backend::setFresh(uint32_t domain_id)
+{
+  setLastCheck(domain_id, time(nullptr));
 }
 
 bool Bind2Backend::startTransaction(const DNSName& qname, int id)
@@ -304,7 +316,7 @@ bool Bind2Backend::feedRecord(const DNSResourceRecord& rr, const DNSName& ordern
     // fallthrough
   default:
     if (d_of && *d_of) {
-      *d_of << qname << "\t" << rr.ttl << "\t" << rr.qtype.getName() << "\t" << content << endl;
+      *d_of << qname << "\t" << rr.ttl << "\t" << rr.qtype.toString() << "\t" << content << endl;
     }
   }
   return true;
@@ -487,7 +499,7 @@ void Bind2Backend::parseZoneFile(BB2DomainInfo* bbd)
     nsec3zone = dk.getNSEC3PARAM(bbd->d_name, &ns3pr);
   }
   else
-    nsec3zone = getNSEC3PARAM(bbd->d_name, &ns3pr);
+    nsec3zone = getNSEC3PARAMuncached(bbd->d_name, &ns3pr);
 
   auto records = std::make_shared<recordstorage_t>();
   ZoneParserTNG zpt(bbd->d_filename, bbd->d_name, s_binddirectory, d_upgradeContent);
@@ -507,6 +519,8 @@ void Bind2Backend::parseZoneFile(BB2DomainInfo* bbd)
   bbd->d_checknow = false;
   bbd->d_status = "parsed into memory at " + nowTime();
   bbd->d_records = LookButDontTouch<recordstorage_t>(records);
+  bbd->d_nsec3zone = nsec3zone;
+  bbd->d_nsec3param = ns3pr;
 }
 
 /** THIS IS AN INTERNAL FUNCTION! It does moadnsparser prio impedance matching
@@ -521,7 +535,7 @@ void Bind2Backend::insertRecord(std::shared_ptr<recordstorage_t>& records, const
   else if (bdr.qname.isPartOf(zoneName))
     bdr.qname.makeUsRelative(zoneName);
   else {
-    string msg = "Trying to insert non-zone data, name='" + bdr.qname.toLogString() + "', qtype=" + qtype.getName() + ", zone='" + zoneName.toLogString() + "'";
+    string msg = "Trying to insert non-zone data, name='" + bdr.qname.toLogString() + "', qtype=" + qtype.toString() + ", zone='" + zoneName.toLogString() + "'";
     if (s_ignore_broken_records) {
       g_log << Logger::Warning << msg << " ignored" << endl;
       return;
@@ -563,6 +577,8 @@ string Bind2Backend::DLReloadNowHandler(const vector<string>& parts, Utility::pi
         ret << *i << ": [missing]\n";
       else
         ret << *i << ": " << (bbd.d_wasRejectedLastReload ? "[rejected]" : "") << "\t" << bbd.d_status << "\n";
+      purgeAuthCaches(zone.toString() + "$");
+      DNSSECKeeper::clearMetaCache(zone);
     }
     else
       ret << *i << " no such domain\n";
@@ -703,6 +719,8 @@ string Bind2Backend::DLAddDomainHandler(const vector<string>& parts, Utility::pi
 
   safePutBBDomainInfo(bbd);
 
+  g_zoneCache.add(domainname, bbd.d_id); // make new zone visible
+
   g_log << Logger::Warning << "Zone " << domainname << " loaded" << endl;
   return "Loaded zone " + domainname.toLogString() + " from " + filename;
 }
@@ -805,7 +823,7 @@ void Bind2Backend::fixupOrderAndAuth(std::shared_ptr<recordstorage_t>& records, 
       records->replace(iter, bdr);
     }
 
-    // cerr<<iter->qname<<"\t"<<QType(iter->qtype).getName()<<"\t"<<iter->nsec3hash<<"\t"<<iter->auth<<endl;
+    // cerr<<iter->qname<<"\t"<<QType(iter->qtype).toString()<<"\t"<<iter->nsec3hash<<"\t"<<iter->auth<<endl;
   }
 }
 
@@ -857,7 +875,7 @@ void Bind2Backend::doEmptyNonTerminals(std::shared_ptr<recordstorage_t>& records
       hashed = toBase32Hex(hashQNameWithSalt(ns3pr, rr.qname));
     insertRecord(records, zoneName, rr.qname, rr.qtype, rr.content, rr.ttl, hashed, &nt.second);
 
-    // cerr<<rr.qname<<"\t"<<rr.qtype.getName()<<"\t"<<hashed<<"\t"<<nt.second<<endl;
+    // cerr<<rr.qname<<"\t"<<rr.qtype.toString()<<"\t"<<hashed<<"\t"<<nt.second<<endl;
   }
 }
 
@@ -1089,18 +1107,8 @@ bool Bind2Backend::getBeforeAndAfterNamesAbsolute(uint32_t id, const DNSName& qn
   if (!safeGetBBDomainInfo(id, &bbd))
     return false;
 
-  NSEC3PARAMRecordContent ns3pr;
-
-  bool nsec3zone;
-  if (d_hybrid) {
-    DNSSECKeeper dk;
-    nsec3zone = dk.getNSEC3PARAM(bbd.d_name, &ns3pr);
-  }
-  else
-    nsec3zone = getNSEC3PARAM(bbd.d_name, &ns3pr);
-
   shared_ptr<const recordstorage_t> records = bbd.d_records.get();
-  if (!nsec3zone) {
+  if (!bbd.d_nsec3zone) {
     return findBeforeAndAfterUnhashed(records, qname, unhashed, before, after);
   }
   else {
@@ -1142,7 +1150,7 @@ void Bind2Backend::lookup(const QType& qtype, const DNSName& qname, int zoneId, 
   BB2DomainInfo bbd;
 
   if (mustlog)
-    g_log << Logger::Warning << "Lookup for '" << qtype.getName() << "' of '" << qname << "' within zoneID " << zoneId << endl;
+    g_log << Logger::Warning << "Lookup for '" << qtype.toString() << "' of '" << qname << "' within zoneID " << zoneId << endl;
 
   if (zoneId >= 0) {
     if ((found = (safeGetBBDomainInfo(zoneId, &bbd) && qname.isPartOf(bbd.d_name)))) {
@@ -1228,7 +1236,7 @@ bool Bind2Backend::get(DNSResourceRecord& r)
     return false;
   }
   if (d_handle.mustlog)
-    g_log << Logger::Warning << "Returning: '" << r.qtype.getName() << "' of '" << r.qname << "', content: '" << r.content << "'" << endl;
+    g_log << Logger::Warning << "Returning: '" << r.qtype.toString() << "' of '" << r.qname << "', content: '" << r.content << "'" << endl;
   return true;
 }
 
@@ -1250,14 +1258,14 @@ void Bind2Backend::handle::reset()
 //#define DLOG(x) x
 bool Bind2Backend::handle::get_normal(DNSResourceRecord& r)
 {
-  DLOG(g_log << "Bind2Backend get() was called for " << qtype.getName() << " record for '" << qname << "' - " << d_records->size() << " available in total!" << endl);
+  DLOG(g_log << "Bind2Backend get() was called for " << qtype.toString() << " record for '" << qname << "' - " << d_records->size() << " available in total!" << endl);
 
   if (d_iter == d_end_iter) {
     return false;
   }
 
   while (d_iter != d_end_iter && !(qtype.getCode() == QType::ANY || (d_iter)->qtype == qtype.getCode())) {
-    DLOG(g_log << Logger::Warning << "Skipped " << qname << "/" << QType(d_iter->qtype).getName() << ": '" << d_iter->content << "'" << endl);
+    DLOG(g_log << Logger::Warning << "Skipped " << qname << "/" << QType(d_iter->qtype).toString() << ": '" << d_iter->content << "'" << endl);
     d_iter++;
   }
   if (d_iter == d_end_iter) {
@@ -1273,7 +1281,7 @@ bool Bind2Backend::handle::get_normal(DNSResourceRecord& r)
   r.ttl = (d_iter)->ttl;
 
   //if(!d_iter->auth && r.qtype.getCode() != QType::A && r.qtype.getCode()!=QType::AAAA && r.qtype.getCode() != QType::NS)
-  //  cerr<<"Warning! Unauth response for qtype "<< r.qtype.getName() << " for '"<<r.qname<<"'"<<endl;
+  //  cerr<<"Warning! Unauth response for qtype "<< r.qtype.toString() << " for '"<<r.qname<<"'"<<endl;
   r.auth = d_iter->auth;
 
   d_iter++;
@@ -1407,6 +1415,7 @@ bool Bind2Backend::createSlaveDomain(const string& ip, const DNSName& domain, co
   bbd.d_masters.push_back(ComboAddress(ip, 53));
   bbd.setCtime();
   safePutBBDomainInfo(bbd);
+
   return true;
 }
 

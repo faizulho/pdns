@@ -1144,7 +1144,7 @@ Dynamic Blocks
   frees up the memory they use.
   Setting this value to 0 disable the purging mechanism, so entries will remain in the tree.
 
-  :param int sec: The interval between two runs of the cleaning algorithm, in seconds. Default is 300 (5 minutes), 0 means disabled.
+  :param int sec: The interval between two runs of the cleaning algorithm, in seconds. Default is 60 (1 minute), 0 means disabled.
 
 .. _exceedfuncs:
 
@@ -1455,7 +1455,7 @@ Other functions
 
   .. versionadded:: 1.6.0
 
-  Set to true (defaults to false) to drop empty queries (qdcount=0) right away with a NotImp rcode. dnsdist used to drop these queries by default because most rules and existing Lua code expects a query to have a qname, qtype and qclass. However :rfc:`7873` uses these queries to request a server cookie, and :rfc:`8906` as a conformance test, so answering these queries with NotImp is much better than not answering at all.
+  Set to true (defaults to false) to drop empty queries (qdcount=0) right away, instead of answering with a NotImp rcode. dnsdist used to drop these queries by default because most rules and existing Lua code expects a query to have a qname, qtype and qclass. However :rfc:`7873` uses these queries to request a server cookie, and :rfc:`8906` as a conformance test, so answering these queries with NotImp is much better than not answering at all.
 
   :param bool drop: Whether to drop these queries (defaults to false)
 
@@ -1496,6 +1496,15 @@ DOHFrontend
 
   This object represents an address and port dnsdist is listening on for DNS over HTTPS queries.
 
+  .. method:: DOHFrontend:loadNewCertificatesAndKeys(certFile(s), keyFile(s))
+
+     .. versionadded:: 1.7.0
+
+     Create and switch to a new TLS context using the same options than were passed to the corresponding `addDOHLocal()` directive, but loading new certificates and keys from the selected files, replacing the existing ones.
+
+     :param str certFile(s): The path to a X.509 certificate file in PEM format, or a list of paths to such files.
+     :param str keyFile(s): The path to the private key file corresponding to the certificate, or a list of paths to such files, whose order should match the certFile(s) ones.
+
   .. method:: DOHFrontend:loadTicketsKeys(ticketsKeysFile)
 
      Load new tickets keys from the selected file, replacing the existing ones. These keys should be rotated often and never written to persistent storage to preserve forward secrecy. The default is to generate a random key. dnsdist supports several tickets keys to be able to decrypt existing sessions after the rotation.
@@ -1522,7 +1531,7 @@ DOHFrontend
 
   .. versionadded:: 1.4.0
 
-  Return a DOHResponseMapEntry that can be used with :meth:`DOHFrontend.setResponsesMap`. Every query whose path is listed in the ``urls`` parameter to :func:`addDOHLocal` and matches the regular expression supplied in ``regex`` will be immediately answered with a HTTP response.
+  Return a DOHResponseMapEntry that can be used with :meth:`DOHFrontend:setResponsesMap`. Every query whose path is listed in the ``urls`` parameter to :func:`addDOHLocal` and matches the regular expression supplied in ``regex`` will be immediately answered with a HTTP response.
   The status of the HTTP response will be the one supplied by ``status``, and the content set to the one supplied by ``content``, except if the status is a redirection (3xx) in which case the content is expected to be the URL to redirect to.
 
   :param str regex: A regular expression to match the path against.
@@ -1559,8 +1568,8 @@ TLSFrontend
 
      Create and switch to a new TLS context using the same options than were passed to the corresponding `addTLSLocal()` directive, but loading new certificates and keys from the selected files, replacing the existing ones.
 
-  :param str certFile(s): The path to a X.509 certificate file in PEM format, or a list of paths to such files.
-  :param str keyFile(s): The path to the private key file corresponding to the certificate, or a list of paths to such files, whose order should match the certFile(s) ones.
+     :param str certFile(s): The path to a X.509 certificate file in PEM format, or a list of paths to such files.
+     :param str keyFile(s): The path to the private key file corresponding to the certificate, or a list of paths to such files, whose order should match the certFile(s) ones.
 
   .. method:: TLSFrontend:loadTicketsKeys(ticketsKeysFile)
 

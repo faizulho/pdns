@@ -207,20 +207,26 @@ void GSQLBackend::setNotified(uint32_t domain_id, uint32_t serial)
   }
 }
 
-void GSQLBackend::setFresh(uint32_t domain_id)
+void GSQLBackend::setLastCheck(uint32_t domain_id, time_t lastcheck)
 {
   try {
     reconnectIfNeeded();
 
-    d_UpdateLastCheckOfZoneQuery_stmt->
-      bind("last_check", time(nullptr))->
-      bind("domain_id", domain_id)->
-      execute()->
-      reset();
+    d_UpdateLastCheckOfZoneQuery_stmt->bind("last_check", lastcheck)->bind("domain_id", domain_id)->execute()->reset();
   }
   catch (SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to refresh domain_id "+itoa(domain_id)+": "+e.txtReason());
+    throw PDNSException("GSQLBackend unable to update last_check for domain_id " + itoa(domain_id) + ": " + e.txtReason());
   }
+}
+
+void GSQLBackend::setStale(uint32_t domain_id)
+{
+  setLastCheck(domain_id, 0);
+}
+
+void GSQLBackend::setFresh(uint32_t domain_id)
+{
+  setLastCheck(domain_id, time(nullptr));
 }
 
 bool GSQLBackend::setMasters(const DNSName &domain, const vector<ComboAddress> &masters)
@@ -510,12 +516,12 @@ bool GSQLBackend::updateDNSSECOrderNameAndAuth(uint32_t domain_id, const DNSName
           bind("auth", auth)->
           bind("domain_id", domain_id)->
           bind("qname", qname)->
-          bind("qtype", QType(qtype).getName())->
+          bind("qtype", QType(qtype).toString())->
           execute()->
           reset();
       }
       catch(SSqlException &e) {
-        throw PDNSException("GSQLBackend unable to update ordername and auth for " + qname.toLogString() + "|" + QType(qtype).getName() + " for domain_id "+itoa(domain_id)+": "+e.txtReason());
+        throw PDNSException("GSQLBackend unable to update ordername and auth for " + qname.toLogString() + "|" + QType(qtype).toString() + " for domain_id "+itoa(domain_id)+": "+e.txtReason());
       }
     }
   } else {
@@ -541,12 +547,12 @@ bool GSQLBackend::updateDNSSECOrderNameAndAuth(uint32_t domain_id, const DNSName
           bind("auth", auth)->
           bind("domain_id", domain_id)->
           bind("qname", qname)->
-          bind("qtype", QType(qtype).getName())->
+          bind("qtype", QType(qtype).toString())->
           execute()->
           reset();
       }
       catch(SSqlException &e) {
-        throw PDNSException("GSQLBackend unable to nullify ordername and update auth for " + qname.toLogString() + "|" + QType(qtype).getName() + " for domain_id "+itoa(domain_id)+": "+e.txtReason());
+        throw PDNSException("GSQLBackend unable to nullify ordername and update auth for " + qname.toLogString() + "|" + QType(qtype).toString() + " for domain_id "+itoa(domain_id)+": "+e.txtReason());
       }
     }
   }
@@ -734,8 +740,17 @@ bool GSQLBackend::addDomainKey(const DNSName& name, const KeyData& key, int64_t&
       bind("published", key.published)->
       bind("content", key.content)->
       bind("domain", name)->
-      execute()->
-      reset();
+      execute();
+
+    if (d_AddDomainKeyQuery_stmt->hasNextRow()) {
+      SSqlStatement::row_t row;
+      d_AddDomainKeyQuery_stmt->nextRow(row);
+      id = std::stoi(row[0]);
+      d_AddDomainKeyQuery_stmt->reset();
+      return true;
+    } else {
+      d_AddDomainKeyQuery_stmt->reset();
+    }
   }
   catch (SSqlException &e) {
     throw PDNSException("GSQLBackend unable to store key for domain '"+ name.toLogString() + "': "+e.txtReason());
@@ -1111,13 +1126,13 @@ void GSQLBackend::lookup(const QType &qtype,const DNSName &qname, int domain_id,
         d_query_name = "basic-query";
         d_query_stmt = &d_NoIdQuery_stmt;
         (*d_query_stmt)->
-          bind("qtype", qtype.getName())->
+          bind("qtype", qtype.toString())->
           bind("qname", qname);
       } else {
         d_query_name = "id-query";
         d_query_stmt = &d_IdQuery_stmt;
         (*d_query_stmt)->
-          bind("qtype", qtype.getName())->
+          bind("qtype", qtype.toString())->
           bind("qname", qname)->
           bind("domain_id", domain_id);
       }
@@ -1141,7 +1156,7 @@ void GSQLBackend::lookup(const QType &qtype,const DNSName &qname, int domain_id,
       execute();
   }
   catch(SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to lookup '" + qname.toLogString() + "|" + qtype.getName() + "':"+e.txtReason());
+    throw PDNSException("GSQLBackend unable to lookup '" + qname.toLogString() + "|" + qtype.toString() + "':"+e.txtReason());
   }
 
   d_list=false;
@@ -1199,7 +1214,7 @@ bool GSQLBackend::listSubZone(const DNSName &zone, int domain_id) {
 
 bool GSQLBackend::get(DNSResourceRecord &r)
 {
-  // g_log << "GSQLBackend get() was called for "<<qtype.getName() << " record: ";
+  // g_log << "GSQLBackend get() was called for "<<qtype.toString() << " record: ";
   SSqlStatement::row_t row;
 
 skiprow:
@@ -1280,7 +1295,7 @@ bool GSQLBackend::superMasterBackend(const string &ip, const DNSName &domain, co
   return false;
 }
 
-bool GSQLBackend::createDomain(const DNSName &domain, const DomainInfo::DomainKind kind, const vector<ComboAddress> &masters, const string &account)
+bool GSQLBackend::createDomain(const DNSName& domain, const DomainInfo::DomainKind kind, const vector<ComboAddress>& masters, const string& account)
 {
   vector<string> masters_s;
   masters_s.reserve(masters.size());
@@ -1291,6 +1306,7 @@ bool GSQLBackend::createDomain(const DNSName &domain, const DomainInfo::DomainKi
   try {
     reconnectIfNeeded();
 
+    // clang-format off
     d_InsertZoneQuery_stmt->
       bind("type", toUpper(DomainInfo::getKindString(kind)))->
       bind("domain", domain)->
@@ -1298,6 +1314,7 @@ bool GSQLBackend::createDomain(const DNSName &domain, const DomainInfo::DomainKi
       bind("account", account)->
       execute()->
       reset();
+    // clang-format on
   }
   catch(SSqlException &e) {
     throw PDNSException("Database error trying to insert new domain '"+domain.toLogString()+"': "+ e.txtReason());
@@ -1305,7 +1322,7 @@ bool GSQLBackend::createDomain(const DNSName &domain, const DomainInfo::DomainKi
   return true;
 }
 
-bool GSQLBackend::createSlaveDomain(const string &ip, const DNSName &domain, const string &nameserver, const string &account)
+bool GSQLBackend::createSlaveDomain(const string& ip, const DNSName& domain, const string& nameserver, const string& account)
 {
   string name;
   vector<ComboAddress> masters({ComboAddress(ip, 53)});
@@ -1471,7 +1488,7 @@ bool GSQLBackend::replaceRRSet(uint32_t domain_id, const DNSName& qname, const Q
       d_DeleteRRSetQuery_stmt->
         bind("domain_id", domain_id)->
         bind("qname", qname)->
-        bind("qtype", qt.getName())->
+        bind("qtype", qt.toString())->
         execute()->
         reset();
     } else {
@@ -1483,7 +1500,7 @@ bool GSQLBackend::replaceRRSet(uint32_t domain_id, const DNSName& qname, const Q
     }
   }
   catch (SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to delete RRSet " + qname.toLogString() + "|" + qt.getName() + ": "+e.txtReason());
+    throw PDNSException("GSQLBackend unable to delete RRSet " + qname.toLogString() + "|" + qt.toString() + ": "+e.txtReason());
   }
 
   if (rrset.empty()) {
@@ -1493,12 +1510,12 @@ bool GSQLBackend::replaceRRSet(uint32_t domain_id, const DNSName& qname, const Q
       d_DeleteCommentRRsetQuery_stmt->
         bind("domain_id", domain_id)->
         bind("qname", qname)->
-        bind("qtype", qt.getName())->
+        bind("qtype", qt.toString())->
         execute()->
         reset();
     }
     catch (SSqlException &e) {
-      throw PDNSException("GSQLBackend unable to delete comment for RRSet " + qname.toLogString() + "|" + qt.getName() + ": "+e.txtReason());
+      throw PDNSException("GSQLBackend unable to delete comment for RRSet " + qname.toLogString() + "|" + qt.toString() + ": "+e.txtReason());
     }
   }
   for(const auto& rr: rrset) {
@@ -1528,7 +1545,7 @@ bool GSQLBackend::feedRecord(const DNSResourceRecord &r, const DNSName &ordernam
       bind("content",content)->
       bind("ttl",r.ttl)->
       bind("priority",prio)->
-      bind("qtype",r.qtype.getName())->
+      bind("qtype",r.qtype.toString())->
       bind("domain_id",r.domain_id)->
       bind("disabled",r.disabled)->
       bind("qname",r.qname);
@@ -1548,7 +1565,7 @@ bool GSQLBackend::feedRecord(const DNSResourceRecord &r, const DNSName &ordernam
       reset();
   }
   catch (SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to feed record " + r.qname.toLogString() + "|" + r.qtype.getName() + ": "+e.txtReason());
+    throw PDNSException("GSQLBackend unable to feed record " + r.qname.toLogString() + "|" + r.qtype.toString() + ": "+e.txtReason());
   }
   return true; // XXX FIXME this API should not return 'true' I think -ahu 
 }
@@ -1715,7 +1732,7 @@ void GSQLBackend::feedComment(const Comment& comment)
     d_InsertCommentQuery_stmt->
       bind("domain_id",comment.domain_id)->
       bind("qname",comment.qname)->
-      bind("qtype",comment.qtype.getName())->
+      bind("qtype",comment.qtype.toString())->
       bind("modified_at",comment.modified_at)->
       bind("account",comment.account)->
       bind("content",comment.content)->
@@ -1723,7 +1740,7 @@ void GSQLBackend::feedComment(const Comment& comment)
       reset();
   }
   catch (SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to feed comment for RRSet '" + comment.qname.toLogString() + "|" + comment.qtype.getName() + "': "+e.txtReason());
+    throw PDNSException("GSQLBackend unable to feed comment for RRSet '" + comment.qname.toLogString() + "|" + comment.qtype.toString() + "': "+e.txtReason());
   }
 }
 
@@ -1739,12 +1756,12 @@ bool GSQLBackend::replaceComments(const uint32_t domain_id, const DNSName& qname
     d_DeleteCommentRRsetQuery_stmt->
       bind("domain_id",domain_id)->
       bind("qname", qname)->
-      bind("qtype",qt.getName())->
+      bind("qtype",qt.toString())->
       execute()->
       reset();
   }
   catch (SSqlException &e) {
-    throw PDNSException("GSQLBackend unable to delete comment for RRSet '" + qname.toLogString() + "|" + qt.getName() + "': "+e.txtReason());
+    throw PDNSException("GSQLBackend unable to delete comment for RRSet '" + qname.toLogString() + "|" + qt.toString() + "': "+e.txtReason());
   }
 
   for(const auto& comment: comments) {

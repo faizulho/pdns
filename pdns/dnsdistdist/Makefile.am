@@ -7,7 +7,8 @@ AM_CPPFLAGS += $(SYSTEMD_CFLAGS) \
 	$(NET_SNMP_CFLAGS) \
 	$(LIBCAP_CFLAGS) \
 	-I$(top_srcdir)/ext/protozero/include \
-	-DSYSCONFDIR=\"${sysconfdir}\"
+	-DSYSCONFDIR=\"${sysconfdir}\" \
+	-DBOOST_CONTAINER_USE_STD_EXCEPTIONS
 
 ACLOCAL_AMFLAGS = -I m4
 
@@ -213,7 +214,6 @@ dnsdist_SOURCES = \
 	tcpiohandler.cc tcpiohandler.hh \
 	threadname.hh threadname.cc \
 	uuid-utils.hh uuid-utils.cc \
-	views.hh \
 	xpf.cc xpf.hh
 
 testrunner_SOURCES = \
@@ -370,6 +370,11 @@ endif
 CLEANFILES += lua.hpp
 
 if HAVE_FREEBSD
+dnsdist_SOURCES += kqueuemplexer.cc
+testrunner_SOURCES += kqueuemplexer.cc
+endif
+
+if HAVE_OPENBSD
 dnsdist_SOURCES += kqueuemplexer.cc
 testrunner_SOURCES += kqueuemplexer.cc
 endif

@@ -51,7 +51,6 @@ std::shared_ptr<AggressiveNSECCache::ZoneEntry> AggressiveNSECCache::getBestZone
 
 std::shared_ptr<AggressiveNSECCache::ZoneEntry> AggressiveNSECCache::getZone(const DNSName& zone)
 {
-  std::shared_ptr<AggressiveNSECCache::ZoneEntry> entry{nullptr};
   {
     ReadLock rl(d_lock);
     auto got = d_zones.lookup(zone);
@@ -60,8 +59,7 @@ std::shared_ptr<AggressiveNSECCache::ZoneEntry> AggressiveNSECCache::getZone(con
     }
   }
 
-  entry = std::make_shared<ZoneEntry>();
-  entry->d_zone = zone;
+  auto entry = std::make_shared<ZoneEntry>(zone);
 
   {
     WriteLock wl(d_lock);
@@ -207,14 +205,18 @@ static bool isMinimallyCoveringNSEC(const DNSName& owner, const std::shared_ptr<
      is not clearly defined there */
   const auto& storage = owner.getStorage();
   const auto& nextStorage = nsec->d_next.getStorage();
+
+  // is the next name at least two octets long?
   if (nextStorage.size() <= 2 || storage.size() != (nextStorage.size() - 2)) {
     return false;
   }
 
+  // does the next name start with a one-octet long label containing a zero, i.e. `\000`?
   if (nextStorage.at(0) != 1 || static_cast<uint8_t>(nextStorage.at(1)) != static_cast<uint8_t>(0)) {
     return false;
   }
 
+  // is the rest of the next name identical to the owner name, i.e. is the next name the owner name prefixed by '\000.'?
   if (nextStorage.compare(2, nextStorage.size() - 2, storage) != 0) {
     return false;
   }
@@ -222,6 +224,12 @@ static bool isMinimallyCoveringNSEC(const DNSName& owner, const std::shared_ptr<
   return true;
 }
 
+// This function name is somewhat misleading. It only returns true if the nextHash is ownerHash+2, as is common
+// in minimally covering NXDOMAINs (i.e. the NSEC3 covers hash[deniedname]-1 .. hash[deniedname]+2.
+// Minimally covering NSEC3s for NODATA tend to be ownerHash+1, because they need to prove the name, so they
+// can tell us what types are in the bitmap for that name. For those names, this function returns false.
+// This is on purpose because NODATA denials actually do contain useful information we can reuse later -
+// specifically, the type bitmap for a name that does exist.
 static bool isMinimallyCoveringNSEC3(const DNSName& owner, const std::shared_ptr<NSEC3RecordContent>& nsec)
 {
   std::string ownerHash(owner.getStorage().c_str(), owner.getStorage().size());
@@ -506,9 +514,19 @@ bool AggressiveNSECCache::synthesizeFromNSECWildcard(time_t now, const DNSName& 
 
 bool AggressiveNSECCache::getNSEC3Denial(time_t now, std::shared_ptr<AggressiveNSECCache::ZoneEntry>& zoneEntry, std::vector<DNSRecord>& soaSet, std::vector<std::shared_ptr<RRSIGRecordContent>>& soaSignatures, const DNSName& name, const QType& type, std::vector<DNSRecord>& ret, int& res, bool doDNSSEC)
 {
-  const auto& salt = zoneEntry->d_salt;
-  const auto iterations = zoneEntry->d_iterations;
-  const auto& zone = zoneEntry->d_zone;
+  DNSName zone;
+  std::string salt;
+  uint16_t iterations;
+
+  {
+    std::unique_lock<std::mutex> lock(zoneEntry->d_lock, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      return false;
+    }
+    salt = zoneEntry->d_salt;
+    zone = zoneEntry->d_zone;
+    iterations = zoneEntry->d_iterations;
+  }
 
   auto nameHash = DNSName(toBase32Hex(hashQNameWithSalt(salt, iterations, name))) + zone;
 
@@ -522,7 +540,7 @@ bool AggressiveNSECCache::getNSEC3Denial(time_t now, std::shared_ptr<AggressiveN
     }
 
     if (!isTypeDenied(nsec3, type)) {
-      LOG(" but the requested type (" << type.getName() << ") does exist" << endl);
+      LOG(" but the requested type (" << type.toString() << ") does exist" << endl);
       return false;
     }
 
@@ -541,7 +559,7 @@ bool AggressiveNSECCache::getNSEC3Denial(time_t now, std::shared_ptr<AggressiveN
     LOG(": done!" << endl);
     ++d_nsec3Hits;
     res = RCode::NoError;
-    addToRRSet(now, soaSet, soaSignatures, zoneEntry->d_zone, doDNSSEC, ret);
+    addToRRSet(now, soaSet, soaSignatures, zone, doDNSSEC, ret);
     addRecordToRRSet(now, exactNSEC3.d_owner, QType::NSEC3, exactNSEC3.d_ttd - now, exactNSEC3.d_record, exactNSEC3.d_signatures, doDNSSEC, ret);
     return true;
   }
@@ -620,7 +638,7 @@ bool AggressiveNSECCache::getNSEC3Denial(time_t now, std::shared_ptr<AggressiveN
     }
 
     if (!isTypeDenied(nsec3, type)) {
-      LOG(" but the requested type (" << type.getName() << ") does exist" << endl);
+      LOG(" but the requested type (" << type.toString() << ") does exist" << endl);
       return synthesizeFromNSEC3Wildcard(now, name, type, ret, res, doDNSSEC, nextCloserEntry, wildcard);
     }
 
@@ -642,7 +660,7 @@ bool AggressiveNSECCache::getNSEC3Denial(time_t now, std::shared_ptr<AggressiveN
     res = RCode::NXDomain;
   }
 
-  addToRRSet(now, soaSet, soaSignatures, zoneEntry->d_zone, doDNSSEC, ret);
+  addToRRSet(now, soaSet, soaSignatures, zone, doDNSSEC, ret);
   addRecordToRRSet(now, closestNSEC3.d_owner, QType::NSEC3, closestNSEC3.d_ttd - now, closestNSEC3.d_record, closestNSEC3.d_signatures, doDNSSEC, ret);
   addRecordToRRSet(now, nextCloserEntry.d_owner, QType::NSEC3, nextCloserEntry.d_ttd - now, nextCloserEntry.d_record, nextCloserEntry.d_signatures, doDNSSEC, ret);
   addRecordToRRSet(now, wcEntry.d_owner, QType::NSEC3, wcEntry.d_ttd - now, wcEntry.d_record, wcEntry.d_signatures, doDNSSEC, ret);

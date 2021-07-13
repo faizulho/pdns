@@ -23,35 +23,42 @@
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
-namespace pdns {
+namespace pdns
+{
 
 // By convention, we are using microsecond units
 struct Bucket
 {
-  std::string d_name;
-  uint64_t d_boundary{0};
-  uint64_t d_count{0};
+  const std::string d_name;
+  const uint64_t d_boundary{0};
+  mutable uint64_t d_count{0};
 };
 
 struct AtomicBucket
 {
   // We need the constructors in this case, since atomics have a disabled copy constructor.
   AtomicBucket() {}
-  AtomicBucket(std::string name, uint64_t boundary, uint64_t val) : d_name(std::move(name)), d_boundary(boundary), d_count(val) {}
-  AtomicBucket(const AtomicBucket& rhs) : d_name(rhs.d_name), d_boundary(rhs.d_boundary), d_count(rhs.d_count.load()) {}
+  AtomicBucket(std::string name, uint64_t boundary, uint64_t val) :
+    d_name(std::move(name)), d_boundary(boundary), d_count(val) {}
+  AtomicBucket(const AtomicBucket& rhs) :
+    d_name(rhs.d_name), d_boundary(rhs.d_boundary), d_count(rhs.d_count.load()) {}
 
-  std::string d_name;
-  uint64_t d_boundary{0};
-  std::atomic<uint64_t> d_count{0};
+  const std::string d_name;
+  const uint64_t d_boundary{0};
+  mutable std::atomic<uint64_t> d_count{0};
 };
 
-template<class B>
+template <class B, class SumType>
 class BaseHistogram
 {
 public:
-  BaseHistogram(const std::string& prefix, const std::vector<uint64_t>& boundaries)
+  BaseHistogram(const std::string& prefix, const std::vector<uint64_t>& boundaries) :
+    d_name(prefix)
   {
     if (!std::is_sorted(boundaries.cbegin(), boundaries.cend())) {
       throw std::invalid_argument("boundary array must be sorted");
@@ -64,16 +71,32 @@ public:
     }
     d_buckets.reserve(boundaries.size() + 1);
     uint64_t prev = 0;
-    for (auto b: boundaries) {
+    for (auto b : boundaries) {
       if (prev == b) {
         throw std::invalid_argument("boundary array's elements should be distinct");
       }
       std::string str = prefix + "le-" + std::to_string(b);
-      d_buckets.emplace_back(B{str, b, 0});
+      d_buckets.emplace_back(str, b, 0);
       prev = b;
     }
+
     // everything above last boundary
-    d_buckets.emplace_back(B{prefix + "le-max", std::numeric_limits<uint64_t>::max(), 0});
+    d_buckets.emplace_back(prefix + "le-max", std::numeric_limits<uint64_t>::max(), 0);
+  }
+
+  BaseHistogram(const std::string& prefix, uint64_t start, int num) :
+    BaseHistogram(prefix, to125(start, num))
+  {
+  }
+
+  std::string getName() const
+  {
+    return d_name;
+  }
+
+  uint64_t getSum() const
+  {
+    return d_sum;
   }
 
   const std::vector<B>& getRawData() const
@@ -93,7 +116,7 @@ public:
     uint64_t c{0};
     for (const auto& b : d_buckets) {
       c += b.d_count;
-      ret.emplace_back(B{b.d_name, b.d_boundary, c});
+      ret.emplace_back(b.d_name, b.d_boundary, c);
     }
     return ret;
   }
@@ -115,21 +138,46 @@ public:
     return b <= bu.d_boundary;
   }
 
-  inline void operator()(uint64_t d)
+  inline void operator()(uint64_t d) const
   {
     auto index = std::upper_bound(d_buckets.begin(), d_buckets.end(), d, lessOrEqual);
-    // out index is always valid
+    // our index is always valid
     ++index->d_count;
+    d_sum += d;
   }
 
 private:
   std::vector<B> d_buckets;
+  const std::string d_name;
+  mutable SumType d_sum{0};
+
+  std::vector<uint64_t> to125(uint64_t start, int num)
+  {
+    std::vector<uint64_t> boundaries;
+    boundaries.reserve(num);
+    boundaries.emplace_back(start);
+    int i = 0;
+    while (true) {
+      if (++i >= num) {
+        break;
+      }
+      boundaries.push_back(2 * start);
+      if (++i >= num) {
+        break;
+      }
+      boundaries.push_back(5 * start);
+      if (++i >= num) {
+        break;
+      }
+      boundaries.push_back(10 * start);
+      start *= 10;
+    }
+    return boundaries;
+  }
 };
 
-template<class T>
-using Histogram = BaseHistogram<Bucket>;
+using Histogram = BaseHistogram<Bucket, uint64_t>;
 
-template<class T>
-using AtomicHistogram = BaseHistogram<AtomicBucket>;
+using AtomicHistogram = BaseHistogram<AtomicBucket, std::atomic<uint64_t>>;
 
 } // namespace pdns

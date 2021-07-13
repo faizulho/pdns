@@ -175,7 +175,6 @@
 ./pdns/gettime.cc
 ./pdns/gettime.hh
 ./pdns/histog.hh
-./pdns/histogram.hh
 ./pdns/inflighter.cc
 ./pdns/ipcipher.cc
 ./pdns/iputils.cc
@@ -198,16 +197,11 @@
 ./pdns/libssl.cc
 ./pdns/libssl.hh
 ./pdns/lock.hh
-./pdns/logger.cc
-./pdns/logger.hh
 ./pdns/lua-auth4.cc
 ./pdns/lua-auth4.hh
 ./pdns/lua-base4.cc
 ./pdns/lua-base4.hh
 ./pdns/lua-record.cc
-./pdns/lua-recursor4-ffi.hh
-./pdns/lua-recursor4.cc
-./pdns/lua-recursor4.hh
 ./pdns/lwres.cc
 ./pdns/lwres.hh
 ./pdns/malloctrace.cc
@@ -275,8 +269,6 @@
 ./pdns/resolver.cc
 ./pdns/resolver.hh
 ./pdns/responsestats-auth.cc
-./pdns/responsestats.cc
-./pdns/responsestats.hh
 ./pdns/rfc2136handler.cc
 ./pdns/root-addresses.hh
 ./pdns/root-dnssec.hh
@@ -382,7 +374,6 @@
 ./pdns/validate.hh
 ./pdns/version.cc
 ./pdns/version.hh
-./pdns/views.hh
 ./pdns/webserver.cc
 ./pdns/webserver.hh
 ./pdns/ws-api.cc
